@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Guide</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow {
+            animation: spin 1.5s linear infinite;
+        }
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        const quests = {
+            'default': {
+                title: "The Local Explorer's Jaunt",
+                summary: "A classic experience, exploring the sights and sounds of a well-known local street.",
+                itinerary: [
+                    { time: "0:00", task: "Start at a Main Landmark", details: "Begin at a well-known spot. The plan is simple: walk, observe, and enjoy the energy." },
+                    { time: "0:25", task: "Explore the Shops", details: "Pop into some interesting local stores. You don't have to buy anything, just soak in the atmosphere." },
+                    { time: "1:00", task: "Snack Break", details: "Find a small local vendor for a classic snack. It's the perfect companion for people-watching." },
+                    { time: "1:30", task: "Cultural Detour", details: "Walk down a side street, admire the local character and the vibrant atmosphere." },
+                    { time: "2:00", task: "Quest Complete!", details: "You've experienced the pulse of the area. Time to head home or continue exploring." }
+                ]
+            }
+        };
+
+        const Option = ({ label, isSelected, onClick }) => (
+            <button
+                onClick={onClick}
+                className={`w-full text-left p-4 rounded-lg border-2 transition-all duration-200 ${
+                    isSelected
+                        ? 'bg-blue-600 border-blue-600 text-white shadow-lg'
+                        : 'bg-white border-slate-200 hover:border-blue-400 hover:shadow-md'
+                }`}
+            >
+                <span className="font-semibold">{label}</span>
+            </button>
+        );
+        
+        function App() {
+            const [appState, setAppState] = useState('welcome'); 
+            const [preferences, setPreferences] = useState({
+                vibe: null,
+                time: null,
+                budget: null,
+                city: 'Bengaluru',
+                area: ''
+            });
+            const [currentQuest, setCurrentQuest] = useState(null);
+
+            const handlePreferenceSelect = (category, value) => {
+                setPreferences(prev => ({ ...prev, [category]: value }));
+            };
+
+            const handleTextChange = (e) => {
+                const { name, value } = e.target;
+                setPreferences(prev => ({ ...prev, [name]: value }));
+            };
+
+            const craftQuest = async () => {
+                setAppState('loading');
+
+                const { vibe, time, budget, city, area } = preferences;
+
+                if (!vibe || !time || !budget || !city || !area) {
+                    console.error("Selections missing, this should not happen.");
+                    setAppState('preferences');
+                    return;
+                }
+                
+                const timeMap = { quick: 'about an hour', medium: '2-4 hours', long: 'half a day' };
+                const budgetMap = { free: 'something free', cheap: 'pocket-friendly', splurge: 'a bit of a splurge' };
+
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+
+                const systemPrompt = `You are Gemini Guide, an expert on creating local experiences. Your role is to create a short, personalized plan (a 'Quest') for a user in a specific location based on their preferences. The plan must be creative, feel like a local wrote it, and be presented as a step-by-step itinerary with timestamps relative to the start (e.g., '0:15' for 15 minutes in). Always return a valid JSON object matching the schema.`;
+
+                const userQuery = `Create a quest in the ${area} area of ${city}. Vibe: ${vibe}. Time available: ${timeMap[time]}. Budget: ${budgetMap[budget]}.`;
+                
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                "title": { "type": "STRING" },
+                                "summary": { "type": "STRING" },
+                                "itinerary": {
+                                    "type": "ARRAY",
+                                    "items": {
+                                        "type": "OBJECT",
+                                        "properties": {
+                                            "time": { "type": "STRING" },
+                                            "task": { "type": "STRING" },
+                                            "details": { "type": "STRING" }
+                                        }, "required": ["time", "task", "details"]
+                                    }
+                                }
+                            }, "required": ["title", "summary", "itinerary"]
+                        }
+                    }
+                };
+
+                let finalQuest = null;
+                let attempts = 0;
+                const maxAttempts = 3;
+
+                while (attempts < maxAttempts && !finalQuest) {
+                    try {
+                        const response = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (!response.ok) {
+                           const errorBody = await response.json().catch(() => ({ error: { message: `HTTP error! status: ${response.status}` } }));
+                           const errorMessage = errorBody?.error?.message || `Status: ${response.status}`;
+                           if (response.status >= 500) {
+                                throw new Error(`API server error: ${errorMessage}. Retrying...`);
+                           }
+                           throw new Error(`API client error: ${errorMessage}.`);
+                        }
+
+                        const result = await response.json();
+                        
+                        if (!result.candidates || !result.candidates[0]?.content?.parts[0]?.text) {
+                            throw new Error("Received an invalid or empty response from the AI.");
+                        }
+
+                        const questJson = result.candidates[0].content.parts[0].text;
+                        finalQuest = JSON.parse(questJson);
+
+                    } catch (error) {
+                        attempts++;
+                        console.warn(`Attempt ${attempts} failed: ${error.message}`);
+                        if (error.message.includes('API client error')) {
+                            console.error("Stopping retries due to a client-side error (e.g., bad API key).");
+                            break; 
+                        }
+                        if (attempts < maxAttempts) {
+                            const delay = Math.pow(2, attempts) * 1000;
+                            await new Promise(res => setTimeout(res, delay));
+                        }
+                    }
+                }
+                
+                if (!finalQuest) {
+                    console.error("Failed to fetch quest from AI after multiple attempts. Falling back to a default quest.");
+                    finalQuest = quests['default'];
+                }
+
+                setCurrentQuest(finalQuest);
+                setAppState('quest');
+            };
+            
+            const restart = () => {
+                setPreferences({ vibe: null, time: null, budget: null, city: 'Bengaluru', area: '' });
+                setCurrentQuest(null);
+                setAppState('welcome');
+            }
+
+            const isReadyToCraft = preferences.vibe && preferences.time && preferences.budget && preferences.city && preferences.area;
+
+            const WelcomeScreen = (
+                <div className="text-center p-8">
+                    <h1 className="text-4xl font-bold text-slate-900 mb-2">Hey there! I'm your Gemini Guide.</h1>
+                    <p className="text-lg text-slate-600 mb-8 max-w-xl mx-auto">
+                        Ready to explore? Just tell me where you are and what you're in the mood for. I'll craft a perfect little adventure just for you.
+                    </p>
+                    <button 
+                        onClick={() => setAppState('preferences')}
+                        className="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:bg-blue-700 transition-all transform hover:scale-105"
+                    >
+                        Let's Get Started
+                    </button>
+                </div>
+            );
+
+            const PreferenceSelector = (
+                <div className="p-4 md:p-8 max-w-4xl mx-auto">
+                    <h2 className="text-3xl font-bold text-center mb-2">Tell me what you're looking for...</h2>
+                    <p className="text-slate-500 text-center mb-8">Fill out your location and preferences below.</p>
+                    
+                    <div className="space-y-8">
+                        <div>
+                            <h3 className="text-xl font-semibold mb-4 text-slate-700">Where are you?</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label htmlFor="city" className="block text-sm font-medium text-slate-600 mb-1">City</label>
+                                    <input 
+                                        type="text" 
+                                        name="city"
+                                        id="city"
+                                        value={preferences.city}
+                                        onChange={handleTextChange}
+                                        className="w-full p-3 rounded-lg border-2 border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                                        placeholder="e.g., Bengaluru"
+                                    />
+                                </div>
+                                <div>
+                                    <label htmlFor="area" className="block text-sm font-medium text-slate-600 mb-1">Area / Neighborhood</label>
+                                    <input 
+                                        type="text" 
+                                        name="area"
+                                        id="area"
+                                        value={preferences.area}
+                                        onChange={handleTextChange}
+                                        className="w-full p-3 rounded-lg border-2 border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+                                        placeholder="e.g., Koramangala"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 className="text-xl font-semibold mb-4 text-slate-700">What's the vibe?</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <Option label="😌 Quiet & Chill" isSelected={preferences.vibe === 'chill'} onClick={() => handlePreferenceSelect('vibe', 'chill')} />
+                                <Option label="🎉 Energetic & Social" isSelected={preferences.vibe === 'social'} onClick={() => handlePreferenceSelect('vibe', 'social')} />
+                                <Option label="🎨 Creative & Artsy" isSelected={preferences.vibe === 'creative'} onClick={() => handlePreferenceSelect('vibe', 'creative')} />
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 className="text-xl font-semibold mb-4 text-slate-700">How much time do you have?</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <Option label="⚡ A Quick Hour" isSelected={preferences.time === 'quick'} onClick={() => handlePreferenceSelect('time', 'quick')} />
+                                <Option label="⏳ 2-4 Hours" isSelected={preferences.time === 'medium'} onClick={() => handlePreferenceSelect('time', 'medium')} />
+                                <Option label="🗓️ Half a Day" isSelected={preferences.time === 'long'} onClick={() => handlePreferenceSelect('time', 'long')} />
+                            </div>
+                        </div>
+
+                        <div>
+                            <h3 className="text-xl font-semibold mb-4 text-slate-700">And your budget?</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <Option label="💸 Just My Time (Free)" isSelected={preferences.budget === 'free'} onClick={() => handlePreferenceSelect('budget', 'free')} />
+                                <Option label="☕ Pocket-Friendly (Under ₹500)" isSelected={preferences.budget === 'cheap'} onClick={() => handlePreferenceSelect('budget', 'cheap')} />
+                                <Option label="🥂 A Little Splurge" isSelected={preferences.budget === 'splurge'} onClick={() => handlePreferenceSelect('budget', 'splurge')} />
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div className="mt-12 text-center">
+                        <button 
+                            onClick={craftQuest}
+                            disabled={!isReadyToCraft}
+                            className={`text-white font-bold py-4 px-10 rounded-lg shadow-lg transition-all transform ${
+                                isReadyToCraft 
+                                    ? 'bg-green-600 hover:bg-green-700 hover:scale-105' 
+                                    : 'bg-slate-400 cursor-not-allowed'
+                            }`}
+                        >
+                            Craft My Quest
+                        </button>
+                    </div>
+                </div>
+            );
+            
+            const LoadingScreen = (
+                <div className="text-center p-8 flex flex-col items-center justify-center h-screen">
+                    <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin-slow mb-6"></div>
+                    <h2 className="text-2xl font-semibold text-slate-800 mb-2">Crafting your adventure...</h2>
+                    <p className="text-slate-500 max-w-sm">Thinking of the perfect plan for you in {preferences.area}, {preferences.city}.</p>
+                </div>
+            );
+
+            const QuestScreen = (
+                <div className="p-4 md:p-8 max-w-2xl mx-auto">
+                    <div className="bg-white rounded-xl shadow-2xl p-8">
+                        <h2 className="text-3xl font-bold text-slate-900 mb-2">{currentQuest?.title}</h2>
+                        <p className="text-slate-600 mb-8">{currentQuest?.summary}</p>
+                        
+                        <div className="relative border-l-2 border-slate-200 ml-4">
+                            {currentQuest?.itinerary?.map((item, index) => (
+                                <div key={index} className="mb-8 pl-8 relative">
+                                    <div className="absolute -left-5 -top-1 w-8 h-8 bg-blue-600 rounded-full border-4 border-white flex items-center justify-center text-white font-bold">
+                                        {index + 1}
+                                    </div>
+                                    <p className="text-blue-600 font-semibold text-sm">+{item.time}</p>
+                                    <h4 className="font-bold text-lg text-slate-800">{item.task}</h4>
+                                    <p className="text-slate-500">{item.details}</p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                     <div className="mt-8 text-center">
+                        <button 
+                            onClick={restart}
+                            className="bg-slate-600 text-white font-bold py-3 px-8 rounded-lg shadow-lg hover:bg-slate-700 transition-all"
+                        >
+                            Plan Another Quest
+                        </button>
+                    </div>
+                </div>
+            );
+
+            const renderContent = () => {
+                switch (appState) {
+                    case 'preferences': return PreferenceSelector;
+                    case 'loading': return LoadingScreen;
+                    case 'quest': return QuestScreen;
+                    case 'welcome':
+                    default: return WelcomeScreen;
+                }
+            };
+            
+            return (
+                <main className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-100 py-12">
+                   {renderContent()}
+                </main>
+            );
+        }
+
+        const container = document.getElementById('root');
+        const root = ReactDOM.createRoot(container);
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
